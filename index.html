@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roma Fresca - Mappa dei Picnic</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        .info-box {
+            position: absolute; top: 20px; left: 20px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.95); padding: 15px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); max-width: 320px;
+            backdrop-filter: blur(5px);
+        }
+        h1 { margin: 0 0 5px 0; font-size: 20px; color: #1e293b; display: flex; align-items: center; gap: 8px; }
+        p { margin: 0 0 10px 0; font-size: 13px; color: #64748b; line-height: 1.4; }
+        .legend { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: bold; }
+        .gradient-bar {
+            flex-grow: 1; height: 10px;
+            background: linear-gradient(to right, #2ecc71, #f1c40f, #e74c3c);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="info-box">
+        <h1>Roma Fresca 🌳</h1>
+        <p>Mappa termica live dei quartieri e dei parchi di Roma. Trova l'ombra perfetta per il tuo picnic o una passeggiata rigenerante.</p>
+        <div class="legend">
+            <span>Fresco</span>
+            <div class="gradient-bar"></div>
+            <span>Caldo</span>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Inizializziamo la mappa su Roma con uno zoom leggermente più indietro per vedere tutta la città
+        const map = L.map('map').setView([41.8902, 12.4922], 11.5);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Copertura totale di Roma: 24 punti strategici tra cemento e grandi parchi
+        const zoneRoma = [
+            // --- CENTRO ---
+            { nome: "Centro Storico (Colosseo)", lat: 41.8902, lon: 12.4922 },
+            { nome: "Prati / San Pietro", lat: 41.9081, lon: 12.4654 },
+            { nome: "Trastevere", lat: 41.8885, lon: 12.4682 },
+            { nome: "San Lorenzo / Termini", lat: 41.8979, lon: 12.5134 },
+            { nome: "Testaccio", lat: 41.8794, lon: 12.4776 },
+            
+            // --- NORD ---
+            { nome: "Parioli / Flaminio", lat: 41.9267, lon: 12.4896 },
+            { nome: "Monte Mario", lat: 41.9229, lon: 12.4526 },
+            { nome: "Ponte Milvio / Tor di Quinto", lat: 41.9358, lon: 12.4661 },
+            { nome: "Villa Ada (Parco)", lat: 41.9322, lon: 12.5085 },
+            { nome: "Nomentano / Conca d'Oro", lat: 41.9412, lon: 12.5211 },
+
+            // --- EST ---
+            { nome: "San Giovanni / Re di Roma", lat: 41.8851, lon: 12.5094 },
+            { nome: "Pigneto", lat: 41.8887, lon: 12.5283 },
+            { nome: "Tiburtina / Stazione", lat: 41.9103, lon: 12.5312 },
+            { nome: "Centocelle", lat: 41.8874, lon: 12.5638 },
+            { nome: "Parco degli Acquedotti (Parco)", lat: 41.8532, lon: 12.5534 },
+            { nome: "Tor Bella Monaca", lat: 41.8638, lon: 12.6322 },
+
+            // --- SUD ---
+            { nome: "Garbatella", lat: 41.8617, lon: 12.4883 },
+            { nome: "Ostiense / San Paolo", lat: 41.8715, lon: 12.4812 },
+            { nome: "Parco della Caffarella (Parco)", lat: 41.8643, lon: 12.5186 },
+            { nome: "EUR (Laghetto)", lat: 41.8284, lon: 12.4673 },
+            { nome: "Laurentina / Cecchignola", lat: 41.8122, lon: 12.4811 },
+
+            // --- OVEST ---
+            { nome: "Aurelio / Baldo degli Ubaldi", lat: 41.8986, lon: 12.4301 },
+            { nome: "Villa Pamphili (Parco)", lat: 41.8876, lon: 12.4431 },
+            { nome: "Parco del Pineto (Parco)", lat: 41.9104, lon: 12.4285 },
+            { nome: "Boccea / Primavalle", lat: 41.9112, lon: 12.3941 }
+        ];
+
+        // Funzione helper per calcolare il colore sfumato in base alla temperatura
+        function getColoreDinamico(temp, min, max) {
+            if (max === min) return "#f1c40f"; // Giallo di fallback se sono tutte uguali
+            
+            // Calcoliamo la posizione della temperatura attuale nel range (da 0 a 1)
+            const percentuale = (temp - min) / (max - min);
+            
+            // Convertiamo in HSL: 120 è Verde (fresco), 0 è Rosso (caldo)
+            const hue = (1 - percentuale) * 120; 
+            return `hsl(${hue}, 85%, 50%)`;
+        }
+
+        async function caricaMappaTermica() {
+            const lats = zoneRoma.map(z => z.lat).join(",");
+            const lons = zoneRoma.map(z => z.lon).join(",");
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                // Estraiamo tutte le temperature per calcolare il Min e il Max del momento a Roma
+                const temperature = data.map(res => res.current.temperature_2m);
+                const minTemp = Math.min(...temperature);
+                const maxTemp = Math.max(...temperature);
+
+                zoneRoma.forEach((zona, index) => {
+                    const temp = data[index].current.temperature_2m;
+                    
+                    // Otteniamo il colore dinamico
+                    const coloreCodice = getColoreDinamico(temp, minTemp, maxTemp);
+
+                    // Disegniamo il cerchio termico
+                    const circle = L.circle([zona.lat, zona.lon], {
+                        color: coloreCodice,
+                        fillColor: coloreCodice,
+                        fillOpacity: 0.5,
+                        radius: 1200 // Raggio allargato a 1.2km per coprire bene le aree limitrofe
+                    }).addTo(map);
+
+                    // Popup interattivo al click
+                    circle.bindPopup(`
+                        <div style="font-family: sans-serif;">
+                            <strong style="font-size: 14px;">${zona.nome}</strong><br>
+                            <span style="font-size: 16px; color: #2c3e50;"><b>${temp}°C</b></span><br>
+                            <small style="color: #7f8c8d;">Min a Roma oggi: ${minTemp}°C / Max: ${maxTemp}°C</small>
+                        </div>
+                    `);
+                });
+            } catch (error) {
+                console.error("Errore durante il fetch dei dati meteo:", error);
+            }
+        }
+
+        caricaMappaTermica();
+    </script>
+</body>
+</html>
