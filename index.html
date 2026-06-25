@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Roma Fresca - Mappa dei Picnic!</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <style>
         body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         #map { height: 100vh; width: 100vw; }
@@ -22,23 +24,70 @@
             background: linear-gradient(to right, #2ecc71, #f1c40f, #e74c3c);
             border-radius: 5px;
         }
+        .error-banner {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 1001; background: #e74c3c; color: #fff;
+            padding: 12px 20px; border-radius: 10px; font-size: 14px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: none;
+            align-items: center; gap: 12px; max-width: 90vw;
+        }
+        .error-banner button {
+            background: rgba(255,255,255,0.25); border: none; color: #fff;
+            padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+        }
+        .error-banner button:hover { background: rgba(255,255,255,0.4); }
+        .last-update { margin: 8px 0 0 0; font-size: 11px; color: #94a3b8; }
+        .legend-note { margin: 6px 0 0 0; font-size: 11px; color: #94a3b8; font-style: italic; line-height: 1.3; }
+        .layer-select {
+            width: 100%; margin: 4px 0 10px 0; padding: 6px 8px;
+            border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;
+            background: #fff; color: #1e293b; cursor: pointer;
+        }
+        .control-label { display: block; font-size: 12px; font-weight: bold; color: #475569; margin-bottom: 2px; }
+        .collapse-btn {
+            margin-left: auto; background: none; border: none; cursor: pointer;
+            font-size: 16px; line-height: 1; color: #64748b; padding: 0 4px;
+        }
+        .info-box.collapsed .collapsible { display: none; }
+        .poi-emoji { background: none; border: none; text-align: center; }
+        .raggio-slider { width: 100%; margin: 2px 0 4px 0; cursor: pointer; accent-color: #3b82f6; }
+        @media (max-width: 480px) {
+            .info-box { max-width: calc(100vw - 40px); padding: 12px; }
+            h1 { font-size: 17px; }
+        }
     </style>
 </head>
 <body>
 
-    <div class="info-box">
-        <h1>Roma Fresca 🌳</h1>
-        <p>Mappa termica live dei quartieri e dei parchi di Roma. Trova l'ombra perfetta per il tuo picnic o una passeggiata rigenerante.</p>
-        <div class="legend">
-            <span>Fresco</span>
-            <div class="gradient-bar"></div>
-            <span>Caldo</span>
+    <div class="info-box" id="info-box">
+        <h1>Roma Fresca 🌳 <button id="collapse-btn" class="collapse-btn" aria-label="Comprimi o espandi il pannello" aria-expanded="true">▾</button></h1>
+        <div class="collapsible">
+            <p>Mappa interattiva del microclima di Roma. Scegli cosa visualizzare e trova la zona più adatta al tuo picnic.</p>
+            <label class="control-label" for="layer-select">Visualizza</label>
+            <select id="layer-select" class="layer-select"></select>
+            <label class="control-label" for="raggio-slider">Raggio ricerca: <span id="raggio-val">2.0</span> km</label>
+            <input type="range" id="raggio-slider" class="raggio-slider" min="0.5" max="5" step="0.5" value="2">
+            <p class="legend-note" style="margin-top:0;">Solo per nasoni e parchi (entro il raggio dalla tua posizione).</p>
+            <div class="legend">
+                <span>Più basso</span>
+                <div class="gradient-bar"></div>
+                <span>Più alto</span>
+            </div>
+            <p id="legend-title" class="legend-note">Caricamento…</p>
+            <p class="legend-note">Scala relativa al momento: confronta le zone tra loro, non valori assoluti.</p>
+            <p id="last-update" class="last-update">Caricamento dati…</p>
         </div>
+    </div>
+
+    <div id="error-banner" class="error-banner">
+        <span id="error-text">⚠️ Dati meteo non disponibili.</span>
+        <button id="retry-btn">Riprova</button>
     </div>
 
     <div id="map"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script>
         // Inizializziamo la mappa su Roma con uno zoom leggermente più indietro per vedere tutta la città
         const map = L.map('map').setView([41.8902, 12.4922], 11.5);
@@ -46,6 +95,36 @@
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
+
+        // Layer dei cerchi colorati: lo svuotiamo ad ogni refresh per non accumularli.
+        const cerchiLayer = L.layerGroup().addTo(map);
+        // Layer dei punti di interesse (nasoni / parchi) caricati da OpenStreetMap.
+        // Usiamo il clustering per disegnare poche decine di elementi invece di migliaia
+        // di marker (con fallback a un layerGroup semplice se il plugin non è disponibile).
+        const poiLayer = (typeof L.markerClusterGroup === "function")
+            ? L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 60 })
+            : L.layerGroup();
+        poiLayer.addTo(map);
+        // Conserviamo i dati dell'ultimo fetch per ridisegnare al cambio di variabile.
+        let datiCorrenti = [];
+
+        // Colore in base al valore normalizzato (0..1): verde (basso) -> rosso (alto).
+        function getColore(norm) {
+            const hue = (1 - norm) * 120; // 120 = verde, 0 = rosso
+            return `hsl(${hue}, 85%, 50%)`;
+        }
+
+        // Variabili meteo selezionabili: ricolorano i cerchi della mappa.
+        const VARIABILI = {
+            percepita:   { label: "Calore percepito", apiVar: "apparent_temperature", unita: "°C" },
+            temperatura: { label: "Temperatura aria", apiVar: "temperature_2m",        unita: "°C" },
+            vento:       { label: "Vento",            apiVar: "wind_speed_10m",         unita: "km/h" },
+            umidita:     { label: "Umidità",          apiVar: "relative_humidity_2m",   unita: "%" }
+        };
+        let variabileAttiva = "percepita";
+
+        // Intervallo di auto-refresh dei dati meteo (10 minuti)
+        const INTERVALLO_REFRESH_MS = 10 * 60 * 1000;
 
         // Copertura totale di Roma: 24 punti strategici tra cemento e grandi parchi
         const zoneRoma = [
@@ -55,7 +134,7 @@
             { nome: "Trastevere", lat: 41.8885, lon: 12.4682 },
             { nome: "San Lorenzo / Termini", lat: 41.8979, lon: 12.5134 },
             { nome: "Testaccio", lat: 41.8794, lon: 12.4776 },
-            
+
             // --- NORD ---
             { nome: "Parioli / Flaminio", lat: 41.9267, lon: 12.4896 },
             { nome: "Monte Mario", lat: 41.9229, lon: 12.4526 },
@@ -85,61 +164,360 @@
             { nome: "Boccea / Primavalle", lat: 41.9112, lon: 12.3941 }
         ];
 
-        // Funzione helper per calcolare il colore sfumato in base alla temperatura
-        function getColoreDinamico(temp, min, max) {
-            if (max === min) return "#f1c40f"; // Giallo di fallback se sono tutte uguali
-            
-            // Calcoliamo la posizione della temperatura attuale nel range (da 0 a 1)
-            const percentuale = (temp - min) / (max - min);
-            
-            // Convertiamo in HSL: 120 è Verde (fresco), 0 è Rosso (caldo)
-            const hue = (1 - percentuale) * 120; 
-            return `hsl(${hue}, 85%, 50%)`;
+        // Gestione del banner di errore visibile all'utente
+        const errorBanner = document.getElementById("error-banner");
+        const errorText = document.getElementById("error-text");
+        function mostraErrore(messaggio) {
+            errorText.textContent = `⚠️ ${messaggio}`;
+            errorBanner.style.display = "flex";
         }
+        function nascondiErrore() {
+            errorBanner.style.display = "none";
+        }
+
+        // Disegna (o ridisegna) i cerchi colorati per la variabile selezionata.
+        function disegnaCerchi() {
+            if (!datiCorrenti.length) return;
+            const def = VARIABILI[variabileAttiva];
+            const valori = datiCorrenti.map(d => d.valori[variabileAttiva]);
+            const minV = Math.min(...valori);
+            const maxV = Math.max(...valori);
+            const range = maxV - minV;
+
+            cerchiLayer.clearLayers(); // Rimuoviamo i cerchi del giro precedente
+
+            datiCorrenti.forEach(d => {
+                // Valore normalizzato sul range del momento (0 = min, 1 = max)
+                const norm = range === 0 ? 0.5 : (d.valori[variabileAttiva] - minV) / range;
+                const colore = getColore(norm);
+
+                const circle = L.circle([d.lat, d.lon], {
+                    color: colore,
+                    fillColor: colore,
+                    fillOpacity: 0.5,
+                    radius: 1200
+                }).addTo(cerchiLayer);
+
+                // Tooltip al passaggio del mouse: nome zona + valore della variabile attiva
+                circle.bindTooltip(`${d.nome}: ${d.valori[variabileAttiva]}${def.unita}`, { direction: "top" });
+
+                // Popup al click: nome zona + tutti i valori disponibili
+                const righe = Object.entries(VARIABILI).map(([chiave, v]) =>
+                    `<small style="color: #475569;">${v.label}: <b>${d.valori[chiave]}${v.unita}</b></small>`
+                ).join("<br>");
+                circle.bindPopup(`
+                    <div style="font-family: sans-serif;">
+                        <strong style="font-size: 14px; color: #2c3e50;">${d.nome}</strong><br>
+                        ${righe}
+                    </div>
+                `);
+            });
+
+            // Aggiorniamo l'etichetta della legenda con la variabile mostrata
+            document.getElementById("legend-title").textContent =
+                `${def.label} — ${minV}${def.unita} (più basso) → ${maxV}${def.unita} (più alto)`;
+        }
+
+        // --- Punti di interesse da OpenStreetMap (Overpass API) ---
+        let RAGGIO_POI_M = 2000;     // Raggio di ricerca (regolabile via slider), in metri
+        let posizioneUtente = null;  // [lat, lon] del GPS reale (memorizzato una volta ottenuto)
+        let centroRicerca = null;    // Centro effettivo usato per le query (GPS o fallback)
+        let poiAttivo = null;        // "nasoni" | "parchi" attualmente mostrato (per ricaricare)
+        // Layer per il marker "sei qui" e il cerchio del raggio di ricerca.
+        const posizioneLayer = L.layerGroup().addTo(map);
+        // Più mirror Overpass: se uno è occupato/lento, proviamo il successivo.
+        const OVERPASS_ENDPOINTS = [
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass.private.coffee/api/interpreter"
+        ];
+
+        // Marker con sola emoji (senza l'icona blu di default di Leaflet)
+        function iconaEmoji(emoji) {
+            return L.divIcon({
+                html: `<div style="font-size: 20px; line-height: 20px;">${emoji}</div>`,
+                className: "poi-emoji", iconSize: [22, 22], iconAnchor: [11, 11]
+            });
+        }
+
+        // Interroga Overpass provando più mirror finché uno risponde con JSON valido.
+        async function interrogaOverpass(query) {
+            let ultimoErrore = null;
+            for (const endpoint of OVERPASS_ENDPOINTS) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 25000);
+                try {
+                    const res = await fetch(endpoint, {
+                        method: "POST",
+                        body: "data=" + encodeURIComponent(query),
+                        signal: controller.signal
+                    });
+                    clearTimeout(timer);
+                    const testo = await res.text();
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    // Quando è occupato, Overpass risponde a volte HTTP 200 con HTML:
+                    // proviamo a interpretare il JSON e, se fallisce, passiamo al mirror dopo.
+                    let json;
+                    try { json = JSON.parse(testo); }
+                    catch { throw new Error("risposta non-JSON (server occupato)"); }
+                    return json.elements || [];
+                } catch (e) {
+                    clearTimeout(timer);
+                    ultimoErrore = e;
+                    console.warn(`Overpass non disponibile (${endpoint}): ${e.message}`);
+                    // si prosegue con il mirror successivo
+                }
+            }
+            throw ultimoErrore || new Error("Tutti i mirror Overpass non disponibili");
+        }
+
+        // Area approssimata di un anello di coordinate (proiezione equirettangolare), in m².
+        function areaPoligono(coords) {
+            if (!coords || coords.length < 3) return 0;
+            const latRad = coords[0].lat * Math.PI / 180;
+            const mLat = 110540, mLon = 111320 * Math.cos(latRad);
+            let somma = 0;
+            for (let i = 0; i < coords.length; i++) {
+                const a = coords[i], b = coords[(i + 1) % coords.length];
+                somma += (a.lon * mLon) * (b.lat * mLat) - (b.lon * mLon) * (a.lat * mLat);
+            }
+            return Math.abs(somma) / 2;
+        }
+
+        function centroide(coords) {
+            let la = 0, lo = 0;
+            coords.forEach(c => { la += c.lat; lo += c.lon; });
+            return [la / coords.length, lo / coords.length];
+        }
+
+        // Chiede la posizione GPS al browser (Promise; null se negata o non disponibile).
+        function ottieniPosizione() {
+            return new Promise(resolve => {
+                if (!navigator.geolocation) { resolve(null); return; }
+                navigator.geolocation.getCurrentPosition(
+                    pos => resolve([pos.coords.latitude, pos.coords.longitude]),
+                    err => { console.warn("Geolocalizzazione non disponibile:", err.message); resolve(null); },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+                );
+            });
+        }
+
+        const CENTRO_ROMA = [41.8902, 12.4922]; // Fallback per test quando il GPS manca
+
+        // Disegna il marker centrale e il cerchio del raggio, adattando lo zoom al raggio.
+        function disegnaPosizioneUtente(test) {
+            posizioneLayer.clearLayers();
+            L.marker(centroRicerca, { icon: iconaEmoji(test ? "🧪" : "📍") })
+                .bindPopup(test
+                    ? "🧪 <b>Posizione di test</b><br><small>centro di Roma (GPS non disponibile)</small>"
+                    : "📍 <b>Sei qui</b>")
+                .addTo(posizioneLayer);
+            const cerchio = L.circle(centroRicerca, {
+                radius: RAGGIO_POI_M, color: "#2563eb", weight: 1,
+                fillColor: "#3b82f6", fillOpacity: 0.06
+            }).addTo(posizioneLayer);
+            map.fitBounds(cerchio.getBounds(), { padding: [20, 20] });
+        }
+
+        // Prepara la posizione (GPS reale o fallback) e carica i POI del tipo richiesto.
+        async function mostraPoi(tipo) {
+            poiAttivo = tipo;
+            poiLayer.clearLayers();
+
+            if (!posizioneUtente) {
+                document.getElementById("legend-title").textContent = "Individuo la tua posizione…";
+                posizioneUtente = await ottieniPosizione(); // memorizziamo solo il GPS reale
+            }
+
+            let test = false;
+            if (posizioneUtente) {
+                centroRicerca = posizioneUtente;
+            } else {
+                // GPS non disponibile (es. test locale in http): usiamo il centro di Roma.
+                // Su Cloud Run (HTTPS) il GPS reale funziona e questo ramo non scatta.
+                centroRicerca = CENTRO_ROMA;
+                test = true;
+            }
+
+            disegnaPosizioneUtente(test);
+            if (tipo === "nasoni") await caricaNasoni();
+            else if (tipo === "parchi") await caricaParchi();
+        }
+
+        // Carica i nasoni (fontanelle di acqua potabile) e li segna con ⛲.
+        async function caricaNasoni() {
+            document.getElementById("legend-title").textContent = "Carico le fontanelle vicine…";
+            try {
+                const [lat, lon] = centroRicerca;
+                const q = `[out:json][timeout:25];node["amenity"="drinking_water"](around:${RAGGIO_POI_M},${lat},${lon});out skel;`;
+                const nodi = await interrogaOverpass(q);
+                const marker = nodi.map(n =>
+                    L.marker([n.lat, n.lon], { icon: iconaEmoji("⛲") })
+                        .bindPopup("⛲ <b>Nasone</b><br><small>Acqua potabile gratuita</small>")
+                );
+                poiLayer.addLayers ? poiLayer.addLayers(marker) : marker.forEach(m => m.addTo(poiLayer));
+                nascondiErrore();
+                document.getElementById("legend-title").textContent = `⛲ ${nodi.length} nasoni entro ${(RAGGIO_POI_M / 1000).toFixed(1)} km`;
+            } catch (e) {
+                console.error("Errore caricamento nasoni:", e);
+                mostraErrore("Impossibile caricare le fontanelle (servizio OpenStreetMap occupato). Riprova tra poco.");
+            }
+        }
+
+        // Carica i parchi più grandi di 3000 m² e li segna con 🌳.
+        async function caricaParchi() {
+            document.getElementById("legend-title").textContent = "Carico i parchi vicini…";
+            try {
+                const [lat, lon] = centroRicerca;
+                const q = `[out:json][timeout:25];(way["leisure"="park"](around:${RAGGIO_POI_M},${lat},${lon});relation["leisure"="park"](around:${RAGGIO_POI_M},${lat},${lon}););out geom;`;
+                const elementi = await interrogaOverpass(q);
+                const marker = [];
+                elementi.forEach(el => {
+                    let area, centro;
+                    if (el.geometry && el.geometry.length >= 3) {
+                        // Way: anello esplicito di coordinate
+                        area = areaPoligono(el.geometry);
+                        centro = centroide(el.geometry);
+                    } else if (el.bounds) {
+                        // Relation: usiamo il riquadro come stima dell'area
+                        const b = el.bounds;
+                        const latRad = (b.minlat + b.maxlat) / 2 * Math.PI / 180;
+                        area = (b.maxlat - b.minlat) * 110540 * (b.maxlon - b.minlon) * 111320 * Math.cos(latRad);
+                        centro = [(b.minlat + b.maxlat) / 2, (b.minlon + b.maxlon) / 2];
+                    } else {
+                        return;
+                    }
+                    if (area < 3000) return; // Scartiamo i parchi troppo piccoli
+                    const nome = (el.tags && el.tags.name) ? el.tags.name : "Parco";
+                    marker.push(
+                        L.marker(centro, { icon: iconaEmoji("🌳") })
+                            .bindPopup(`🌳 <b>${nome}</b><br><small>~${Math.round(area).toLocaleString("it-IT")} m²</small>`)
+                    );
+                });
+                poiLayer.addLayers ? poiLayer.addLayers(marker) : marker.forEach(m => m.addTo(poiLayer));
+                nascondiErrore();
+                document.getElementById("legend-title").textContent = `🌳 ${marker.length} parchi (oltre 3000 m²) entro ${(RAGGIO_POI_M / 1000).toFixed(1)} km`;
+            } catch (e) {
+                console.error("Errore caricamento parchi:", e);
+                mostraErrore("Impossibile caricare i parchi (servizio OpenStreetMap occupato). Riprova tra poco.");
+            }
+        }
+
+        // Punti di interesse selezionabili dal menu (caricati entro 2 km dalla posizione)
+        const POI = {
+            nasoni: { label: "⛲ Nasoni vicini (2 km)" },
+            parchi: { label: "🌳 Parchi vicini (2 km)" }
+        };
 
         async function caricaMappaTermica() {
             const lats = zoneRoma.map(z => z.lat).join(",");
             const lons = zoneRoma.map(z => z.lon).join(",");
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m`;
+            const variabiliApi = Object.values(VARIABILI).map(v => v.apiVar).join(",");
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=${variabiliApi}`;
 
             try {
                 const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
 
-                // Estraiamo tutte le temperature per calcolare il Min e il Max del momento a Roma
-                const temperature = data.map(res => res.current.temperature_2m);
-                const minTemp = Math.min(...temperature);
-                const maxTemp = Math.max(...temperature);
+                // Open-Meteo restituisce un array con più coordinate, ma un singolo
+                // oggetto con una sola: normalizziamo sempre ad array.
+                const risultati = Array.isArray(data) ? data : [data];
 
-                zoneRoma.forEach((zona, index) => {
-                    const temp = data[index].current.temperature_2m;
-                    
-                    // Otteniamo il colore dinamicod
-                    const coloreCodice = getColoreDinamico(temp, minTemp, maxTemp);
+                nascondiErrore(); // Il fetch è andato a buon fine
 
-                    // Disegniamo il cerchio termico
-                    const circle = L.circle([zona.lat, zona.lon], {
-                        color: coloreCodice,
-                        fillColor: coloreCodice,
-                        fillOpacity: 0.5,
-                        radius: 1200 // Raggio allargato a 1.2km per coprire bene le aree limitrofe
-                    }).addTo(map);
+                // Aggiorniamo l'orario dell'ultimo refresh dei dati
+                const ora = new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+                document.getElementById("last-update").textContent = `Ultimo aggiornamento: ${ora}`;
 
-                    // Popup interattivo al click
-                    circle.bindPopup(`
-                        <div style="font-family: sans-serif;">
-                            <strong style="font-size: 14px;">${zona.nome}</strong><br>
-                            <span style="font-size: 16px; color: #2c3e50;"><b>${temp}°C</b></span><br>
-                            <small style="color: #7f8c8d;">Min a Roma oggi: ${minTemp}°C / Max: ${maxTemp}°C</small>
-                        </div>
-                    `);
+                // Conserviamo TUTTE le variabili per ogni punto: servono sia per il
+                // layer selezionato sia per la lettura al click sulla mappa.
+                datiCorrenti = zoneRoma.map((zona, index) => {
+                    const cur = risultati[index].current;
+                    const valori = {};
+                    for (const [chiave, def] of Object.entries(VARIABILI)) {
+                        valori[chiave] = cur[def.apiVar];
+                    }
+                    return { nome: zona.nome, lat: zona.lat, lon: zona.lon, valori };
                 });
+
+                disegnaCerchi(); // Disegna i cerchi per la variabile attiva
             } catch (error) {
                 console.error("Errore durante il fetch dei dati meteo:", error);
+                mostraErrore("Dati meteo non disponibili. Controlla la connessione e riprova.");
             }
         }
 
+        // Pannello informativo collassabile (utile soprattutto su mobile)
+        const infoBox = document.getElementById("info-box");
+        const collapseBtn = document.getElementById("collapse-btn");
+        function impostaCollasso(collassato) {
+            infoBox.classList.toggle("collapsed", collassato);
+            collapseBtn.textContent = collassato ? "▸" : "▾";
+            collapseBtn.setAttribute("aria-expanded", String(!collassato));
+        }
+        collapseBtn.addEventListener("click", () => {
+            impostaCollasso(!infoBox.classList.contains("collapsed"));
+        });
+        // Su schermi piccoli partiamo compressi per non coprire la mappa
+        if (window.matchMedia("(max-width: 480px)").matches) impostaCollasso(true);
+
+        // Popoliamo il menu a tendina: gruppo "Meteo" + gruppo "Punti di interesse"
+        const layerSelect = document.getElementById("layer-select");
+
+        const gruppoMeteo = document.createElement("optgroup");
+        gruppoMeteo.label = "Meteo";
+        for (const [chiave, def] of Object.entries(VARIABILI)) {
+            const opt = document.createElement("option");
+            opt.value = chiave;
+            opt.textContent = def.label;
+            if (chiave === variabileAttiva) opt.selected = true;
+            gruppoMeteo.appendChild(opt);
+        }
+        layerSelect.appendChild(gruppoMeteo);
+
+        const gruppoPoi = document.createElement("optgroup");
+        gruppoPoi.label = "Punti di interesse";
+        for (const [chiave, def] of Object.entries(POI)) {
+            const opt = document.createElement("option");
+            opt.value = chiave;
+            opt.textContent = def.label;
+            gruppoPoi.appendChild(opt);
+        }
+        layerSelect.appendChild(gruppoPoi);
+
+        // Al cambio: variabile meteo -> ricolora i cerchi; POI -> carica da OpenStreetMap
+        layerSelect.addEventListener("change", (e) => {
+            const val = e.target.value;
+            if (val in VARIABILI) {
+                variabileAttiva = val;
+                poiAttivo = null;
+                poiLayer.clearLayers();       // togliamo eventuali nasoni/parchi
+                posizioneLayer.clearLayers(); // e il marker "sei qui" + raggio
+                disegnaCerchi();
+            } else if (val in POI) {
+                mostraPoi(val); // chiede il GPS e mostra i POI entro il raggio
+            }
+        });
+
+        // Slider del raggio: aggiorna l'etichetta live, ricarica i POI al rilascio
+        const raggioSlider = document.getElementById("raggio-slider");
+        const raggioVal = document.getElementById("raggio-val");
+        raggioSlider.addEventListener("input", () => {
+            RAGGIO_POI_M = parseFloat(raggioSlider.value) * 1000;
+            raggioVal.textContent = parseFloat(raggioSlider.value).toFixed(1);
+        });
+        raggioSlider.addEventListener("change", () => {
+            if (poiAttivo) mostraPoi(poiAttivo); // ricarica con il nuovo raggio
+        });
+
+        // Il pulsante "Riprova" nel banner riavvia il caricamento
+        document.getElementById("retry-btn").addEventListener("click", caricaMappaTermica);
+
         caricaMappaTermica();
+
+        // Aggiornamento automatico periodico dei dati meteo
+        setInterval(caricaMappaTermica, INTERVALLO_REFRESH_MS);
     </script>
 </body>
 </html>

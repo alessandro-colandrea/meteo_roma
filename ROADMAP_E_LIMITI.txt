@@ -1,0 +1,133 @@
+========================================================================
+ROMA FRESCA - Mappa Termica di Roma
+Roadmap delle modifiche da implementare e limiti del progetto
+========================================================================
+Data: 25/06/2026
+Stato attuale: index.html (single-page), Dockerfile (nginx), deploy su
+Cloud Run via cloudbuild.yaml.
+
+------------------------------------------------------------------------
+1. COS'È OGGI IL PROGETTO
+------------------------------------------------------------------------
+Una singola pagina HTML che usa Leaflet (mappa OpenStreetMap) e l'API
+gratuita Open-Meteo per disegnare 24 cerchi colorati su Roma. Il colore
+va dal verde (zona più fresca) al rosso (zona più calda) in base alla
+temperatura attuale (current.temperature_2m). Le 24 zone sono
+hard-coded nell'array `zoneRoma`. Nessun backend, nessun database,
+nessun build step: l'index.html viene servito così com'è da nginx.
+
+
+------------------------------------------------------------------------
+2. LIMITI ATTUALI DEL PROGETTO
+------------------------------------------------------------------------
+
+DATI E SIGNIFICATO
+- "Mappa termica" è fuorviante: non è una vera heatmap interpolata, ma
+  24 cerchi discreti di raggio fisso (1200 m). Tra un punto e l'altro
+  non c'è alcun dato, e i cerchi possono sovrapporsi o lasciare buchi.
+- I colori sono RELATIVI, non assoluti: il verde/rosso dipende dal min
+  e max DEL MOMENTO. Se a Roma ci sono 38°C ovunque, la zona "più
+  fresca" (es. 37,5°C) appare comunque verde brillante. Il colore non
+  dice "fa fresco", dice solo "è meno caldo delle altre". Questo
+  contraddice la legenda "Fresco / Caldo" della UI.
+- La temperatura dell'aria (temperature_2m) NON è un buon indicatore di
+  "dove fare un picnic all'ombra": non considera ombra, alberi, umidità,
+  vento, irraggiamento solare. Un parco e una piazza di cemento alla
+  stessa altitudine danno spesso la stessa temperatura aria.
+- Le 24 zone sono fisse e scelte a mano: la copertura non è uniforme e
+  manca tutta la periferia esterna (Ostia, GRA, Casal Palocco, ecc.).
+
+ROBUSTEZZA / TECNICO
+- Nessuna gestione degli errori lato utente: se Open-Meteo è giù o
+  cambia il formato della risposta, la mappa resta vuota e l'utente
+  vede solo un errore in console.
+- Il codice assume che `data` sia un array (batch multi-coordinata).
+  Open-Meteo con una sola coordinata restituisce un oggetto, non un
+  array: il codice si romperebbe. Dipendenza fragile dal formato.
+- Nessun caching: ogni apertura della pagina rifà la chiamata. Nessun
+  refresh automatico: i dati restano "congelati" finché non si ricarica.
+- C'è un refuso nel commento ("colore dinamicod") e la legenda non
+  spiega che la scala è relativa.
+- CDN di terze parti (unpkg) senza fallback: se unpkg è irraggiungibile,
+  Leaflet non si carica e la pagina è una schermata bianca.
+- Nessun test, nessun linting, nessuna CI a parte il build Docker.
+
+ACCESSIBILITÀ / UX
+- Nessun supporto mobile reale oltre al viewport: l'info-box copre la
+  mappa su schermi piccoli.
+- Colori basati solo su hue: problematici per daltonici (verde/rosso).
+- Nessuna indicazione di "ultimo aggiornamento" né dell'ora del dato.
+- Nessuna localizzazione: solo italiano.
+
+SICUREZZA / DEPLOY
+- `--allow-unauthenticated` su Cloud Run: ok per un sito pubblico, ma
+  non c'è rate limiting né CDN davanti (costi/abusi).
+- Tag immagine basato solo su COMMIT_SHA, nessun ambiente di staging.
+
+
+------------------------------------------------------------------------
+3. MODIFICHE DA IMPLEMENTARE (proposte, dalla più facile alla più ambiziosa)
+------------------------------------------------------------------------
+
+QUICK WIN (poche ore)
+[x] Gestire l'errore di fetch mostrando un banner all'utente ("Dati
+    meteo non disponibili, riprova"), non solo console.error.
+[x] Normalizzare la risposta Open-Meteo: gestire sia array sia oggetto
+    singolo, così il codice non si rompe se cambia il numero di punti.
+[x] Aggiungere "Ultimo aggiornamento: HH:MM" nell'info-box.
+[x] Auto-refresh ogni N minuti (es. 10) con setInterval.
+[x] Correggere il refuso "dinamicod" e chiarire in legenda che la scala
+    è relativa al momento attuale ("più fresco / più caldo rispetto al
+    resto della città").
+[x] Tooltip al passaggio del mouse, non solo al click.
+
+MEDIA (1-2 giorni)
+[ ] Passare a una scala di colori ASSOLUTA (es. soglie fisse 20/25/30/
+    35°C) così il colore ha un significato reale, oppure offrire un
+    toggle "relativo / assoluto".
+[X] Usare un indice di calore percepito invece della sola temperatura
+    aria: Open-Meteo fornisce apparent_temperature, umidità, vento e
+    radiazione. Calcolare un "comfort index" più onesto per i picnic.
+[~] Vera heatmap interpolata con Leaflet.heat o un layer raster, invece
+    dei cerchi discreti, per una visualizzazione continua.
+    NOTA: implementata e poi ANNULLATA su richiesta: si è tornati ai
+    cerchi colorati per zona (più leggibili e con nome). Da rivalutare
+    eventualmente come layer aggiuntivo opzionale.
+[~] Aumentare e generare automaticamente i punti: griglia regolare su
+    Roma (es. ogni 1-2 km) invece di 24 zone scelte a mano.
+    NOTA: implementata e poi ANNULLATA su richiesta: la griglia anonima
+    perdeva i nomi delle zone (richiesti nel popup). Si è tornati alle
+    24 zone con nome.
+[ ] Fallback locale per Leaflet (self-host JS/CSS) per non dipendere da
+    unpkg.
+[X] Layer selezionabili: temperatura, percepita, vento, umidità.
+[X] Migliorare mobile: info-box collassabile / bottom sheet.
+
+AMBIZIOSO (evoluzione del prodotto)
+[ ] Backend leggero (Cloud Run / Cloud Functions) che fa da proxy e
+    cache verso Open-Meteo: meno chiamate, possibilità di rate limiting,
+    e di arricchire i dati (es. copertura del verde da OpenStreetMap).
+[ ] Integrare i dati di copertura arborea / parchi (OSM landuse) per
+    stimare davvero "dove c'è ombra", non solo la temperatura aria.
+    Questo è il vero valore aggiunto rispetto a un'app meteo qualsiasi.
+[ ] Previsione oraria: slider temporale per vedere come cambierà la
+    mappa nelle prossime ore (Open-Meteo offre hourly forecast).
+[ ] Geolocalizzazione utente + "trova la zona fresca più vicina".
+[~] Punti di interesse: fontanelle (nasoni), aree picnic attrezzate,
+    fontane, da dataset OSM / Open Data Roma Capitale.
+    FATTO in parte: aggiunti al menu i layer "Nasoni" (⛲, da OSM
+    amenity=drinking_water) e "Parchi" (🌳, leisure=park > 3000 m²),
+    caricati live via Overpass API. Mancano: aree picnic attrezzate.
+[ ] PWA installabile + accessibilità (palette color-blind safe, ARIA).
+[ ] Ambiente di staging separato e CDN (Cloud CDN) davanti a Cloud Run.
+
+
+------------------------------------------------------------------------
+4. PRIORITÀ CONSIGLIATA
+------------------------------------------------------------------------
+1) Onestà del dato: scala assoluta + temperatura percepita. È il
+   problema più grave, perché oggi la mappa può ingannare l'utente.
+2) Robustezza: gestione errori, auto-refresh, fallback CDN.
+3) Vero valore: integrazione verde/ombra + fontanelle, che trasforma
+   un giocattolo meteo in uno strumento utile per i picnic a Roma.
+========================================================================
