@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Roma Fresca - Mappa dei Picnic!</title>
+    <title>Roma · Punti di interesse</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
@@ -16,14 +16,23 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.2); max-width: 320px;
             backdrop-filter: blur(5px);
         }
-        h1 { margin: 0 0 5px 0; font-size: 20px; color: #1e293b; display: flex; align-items: center; gap: 8px; }
+        h1 { margin: 0 0 5px 0; font-size: 19px; color: #1e293b; display: flex; align-items: center; gap: 8px; }
         p { margin: 0 0 10px 0; font-size: 13px; color: #64748b; line-height: 1.4; }
-        .legend { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: bold; }
-        .gradient-bar {
-            flex-grow: 1; height: 10px;
-            background: linear-gradient(to right, #2ecc71, #f1c40f, #e74c3c);
-            border-radius: 5px;
+
+        /* Riquadro meteo di Roma (in alto a destra) */
+        .weather-box {
+            position: absolute; top: 20px; right: 20px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.95); padding: 14px 16px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); backdrop-filter: blur(5px); min-width: 190px;
         }
+        .weather-head { display: flex; align-items: center; gap: 10px; }
+        .weather-icon { font-size: 36px; line-height: 1; }
+        .weather-temp { font-size: 24px; font-weight: bold; color: #1e293b; }
+        .weather-cond { font-size: 12px; color: #64748b; }
+        .weather-grid { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; color: #64748b; text-align: center; }
+        .weather-grid b { display: block; font-size: 13px; color: #1e293b; margin-top: 2px; }
+        .weather-time { margin-top: 8px; font-size: 10px; color: #94a3b8; }
+
         .error-banner {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             z-index: 1001; background: #e74c3c; color: #fff;
@@ -36,7 +45,6 @@
             padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
         }
         .error-banner button:hover { background: rgba(255,255,255,0.4); }
-        .last-update { margin: 8px 0 0 0; font-size: 11px; color: #94a3b8; }
         .legend-note { margin: 6px 0 0 0; font-size: 11px; color: #94a3b8; font-style: italic; line-height: 1.3; }
         .layer-select {
             width: 100%; margin: 4px 0 10px 0; padding: 6px 8px;
@@ -52,35 +60,52 @@
         .poi-emoji { background: none; border: none; text-align: center; }
         .raggio-slider { width: 100%; margin: 2px 0 4px 0; cursor: pointer; accent-color: #3b82f6; }
         @media (max-width: 480px) {
-            .info-box { max-width: calc(100vw - 40px); padding: 12px; }
-            h1 { font-size: 17px; }
+            .info-box { top: 10px; left: 10px; max-width: 50vw; padding: 8px 10px; }
+            h1 { font-size: 13px; gap: 4px; }
+            .info-box p, .control-label, .layer-select, .legend-note { font-size: 11px; }
+            .weather-box { top: 10px; right: 10px; padding: 8px 10px; min-width: 0; max-width: 44vw; }
+            .weather-head { gap: 6px; }
+            .weather-icon { font-size: 24px; }
+            .weather-temp { font-size: 18px; }
+            .weather-cond { font-size: 10px; }
+            .weather-grid { gap: 8px; font-size: 9px; margin-top: 8px; }
+            .weather-grid b { font-size: 11px; }
+            .weather-time { font-size: 9px; }
         }
     </style>
 </head>
 <body>
 
     <div class="info-box" id="info-box">
-        <h1>Roma Fresca 🌳 <button id="collapse-btn" class="collapse-btn" aria-label="Comprimi o espandi il pannello" aria-expanded="true">▾</button></h1>
+        <h1>Roma · Punti di interesse 📍 <button id="collapse-btn" class="collapse-btn" aria-label="Comprimi o espandi il pannello" aria-expanded="true">▾</button></h1>
         <div class="collapsible">
-            <p>Mappa interattiva del microclima di Roma. Scegli cosa visualizzare e trova la zona più adatta al tuo picnic.</p>
-            <label class="control-label" for="layer-select">Visualizza</label>
+            <p>Scopri i punti di interesse vicino a te a Roma. Scegli cosa mostrare e regola il raggio di ricerca.</p>
+            <label class="control-label" for="layer-select">Mostra</label>
             <select id="layer-select" class="layer-select"></select>
             <label class="control-label" for="raggio-slider">Raggio ricerca: <span id="raggio-val">2.0</span> km</label>
             <input type="range" id="raggio-slider" class="raggio-slider" min="0.5" max="5" step="0.5" value="2">
-            <p class="legend-note" style="margin-top:0;">Solo per nasoni e parchi (entro il raggio dalla tua posizione).</p>
-            <div class="legend">
-                <span>Più basso</span>
-                <div class="gradient-bar"></div>
-                <span>Più alto</span>
-            </div>
-            <p id="legend-title" class="legend-note">Caricamento…</p>
-            <p class="legend-note">Scala relativa al momento: confronta le zone tra loro, non valori assoluti.</p>
-            <p id="last-update" class="last-update">Caricamento dati…</p>
+            <p id="legend-title" class="legend-note">Scegli un punto di interesse dal menu.</p>
         </div>
     </div>
 
+    <div class="weather-box" id="weather-box">
+        <div class="weather-head">
+            <span class="weather-icon" id="weather-icon">⛅</span>
+            <div>
+                <div class="weather-temp" id="weather-temp">--°C</div>
+                <div class="weather-cond" id="weather-cond">Roma</div>
+            </div>
+        </div>
+        <div class="weather-grid">
+            <div>🌡️ Percepiti<b id="weather-feels">--°</b></div>
+            <div>💧 Umidità<b id="weather-hum">--%</b></div>
+            <div>💨 Vento<b id="weather-wind">-- km/h</b></div>
+        </div>
+        <div class="weather-time" id="weather-time">Caricamento meteo…</div>
+    </div>
+
     <div id="error-banner" class="error-banner">
-        <span id="error-text">⚠️ Dati meteo non disponibili.</span>
+        <span id="error-text">⚠️ Dati non disponibili.</span>
         <button id="retry-btn">Riprova</button>
     </div>
 
@@ -89,80 +114,22 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script>
-        // Inizializziamo la mappa su Roma con uno zoom leggermente più indietro per vedere tutta la città
-        const map = L.map('map').setView([41.8902, 12.4922], 11.5);
+        // Mappa centrata su Roma
+        const map = L.map('map').setView([41.8902, 12.4922], 12);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Layer dei cerchi colorati: lo svuotiamo ad ogni refresh per non accumularli.
-        const cerchiLayer = L.layerGroup().addTo(map);
-        // Layer dei punti di interesse (nasoni / parchi) caricati da OpenStreetMap.
-        // Usiamo il clustering per disegnare poche decine di elementi invece di migliaia
-        // di marker (con fallback a un layerGroup semplice se il plugin non è disponibile).
+        // Layer dei punti di interesse (nasoni / parchi) con clustering per le performance
+        // (fallback a un layerGroup semplice se il plugin non è disponibile).
         const poiLayer = (typeof L.markerClusterGroup === "function")
             ? L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 60 })
             : L.layerGroup();
         poiLayer.addTo(map);
-        // Conserviamo i dati dell'ultimo fetch per ridisegnare al cambio di variabile.
-        let datiCorrenti = [];
 
-        // Colore in base al valore normalizzato (0..1): verde (basso) -> rosso (alto).
-        function getColore(norm) {
-            const hue = (1 - norm) * 120; // 120 = verde, 0 = rosso
-            return `hsl(${hue}, 85%, 50%)`;
-        }
-
-        // Variabili meteo selezionabili: ricolorano i cerchi della mappa.
-        const VARIABILI = {
-            percepita:   { label: "Calore percepito", apiVar: "apparent_temperature", unita: "°C" },
-            temperatura: { label: "Temperatura aria", apiVar: "temperature_2m",        unita: "°C" },
-            vento:       { label: "Vento",            apiVar: "wind_speed_10m",         unita: "km/h" },
-            umidita:     { label: "Umidità",          apiVar: "relative_humidity_2m",   unita: "%" }
-        };
-        let variabileAttiva = "percepita";
-
-        // Intervallo di auto-refresh dei dati meteo (10 minuti)
+        // Intervallo di auto-refresh del meteo (10 minuti)
         const INTERVALLO_REFRESH_MS = 10 * 60 * 1000;
-
-        // Copertura totale di Roma: 24 punti strategici tra cemento e grandi parchi
-        const zoneRoma = [
-            // --- CENTRO ---
-            { nome: "Centro Storico (Colosseo)", lat: 41.8902, lon: 12.4922 },
-            { nome: "Prati / San Pietro", lat: 41.9081, lon: 12.4654 },
-            { nome: "Trastevere", lat: 41.8885, lon: 12.4682 },
-            { nome: "San Lorenzo / Termini", lat: 41.8979, lon: 12.5134 },
-            { nome: "Testaccio", lat: 41.8794, lon: 12.4776 },
-
-            // --- NORD ---
-            { nome: "Parioli / Flaminio", lat: 41.9267, lon: 12.4896 },
-            { nome: "Monte Mario", lat: 41.9229, lon: 12.4526 },
-            { nome: "Ponte Milvio / Tor di Quinto", lat: 41.9358, lon: 12.4661 },
-            { nome: "Villa Ada (Parco)", lat: 41.9322, lon: 12.5085 },
-            { nome: "Nomentano / Conca d'Oro", lat: 41.9412, lon: 12.5211 },
-
-            // --- EST ---
-            { nome: "San Giovanni / Re di Roma", lat: 41.8851, lon: 12.5094 },
-            { nome: "Pigneto", lat: 41.8887, lon: 12.5283 },
-            { nome: "Tiburtina / Stazione", lat: 41.9103, lon: 12.5312 },
-            { nome: "Centocelle", lat: 41.8874, lon: 12.5638 },
-            { nome: "Parco degli Acquedotti (Parco)", lat: 41.8532, lon: 12.5534 },
-            { nome: "Tor Bella Monaca", lat: 41.8638, lon: 12.6322 },
-
-            // --- SUD ---
-            { nome: "Garbatella", lat: 41.8617, lon: 12.4883 },
-            { nome: "Ostiense / San Paolo", lat: 41.8715, lon: 12.4812 },
-            { nome: "Parco della Caffarella (Parco)", lat: 41.8643, lon: 12.5186 },
-            { nome: "EUR (Laghetto)", lat: 41.8284, lon: 12.4673 },
-            { nome: "Laurentina / Cecchignola", lat: 41.8122, lon: 12.4811 },
-
-            // --- OVEST ---
-            { nome: "Aurelio / Baldo degli Ubaldi", lat: 41.8986, lon: 12.4301 },
-            { nome: "Villa Pamphili (Parco)", lat: 41.8876, lon: 12.4431 },
-            { nome: "Parco del Pineto (Parco)", lat: 41.9104, lon: 12.4285 },
-            { nome: "Boccea / Primavalle", lat: 41.9112, lon: 12.3941 }
-        ];
 
         // Gestione del banner di errore visibile all'utente
         const errorBanner = document.getElementById("error-banner");
@@ -175,50 +142,50 @@
             errorBanner.style.display = "none";
         }
 
-        // Disegna (o ridisegna) i cerchi colorati per la variabile selezionata.
-        function disegnaCerchi() {
-            if (!datiCorrenti.length) return;
-            const def = VARIABILI[variabileAttiva];
-            const valori = datiCorrenti.map(d => d.valori[variabileAttiva]);
-            const minV = Math.min(...valori);
-            const maxV = Math.max(...valori);
-            const range = maxV - minV;
+        // ===================== METEO GENERALE DI ROMA =====================
+        const COORD_ROMA = [41.8902, 12.4922];
 
-            cerchiLayer.clearLayers(); // Rimuoviamo i cerchi del giro precedente
-
-            datiCorrenti.forEach(d => {
-                // Valore normalizzato sul range del momento (0 = min, 1 = max)
-                const norm = range === 0 ? 0.5 : (d.valori[variabileAttiva] - minV) / range;
-                const colore = getColore(norm);
-
-                const circle = L.circle([d.lat, d.lon], {
-                    color: colore,
-                    fillColor: colore,
-                    fillOpacity: 0.5,
-                    radius: 1200
-                }).addTo(cerchiLayer);
-
-                // Tooltip al passaggio del mouse: nome zona + valore della variabile attiva
-                circle.bindTooltip(`${d.nome}: ${d.valori[variabileAttiva]}${def.unita}`, { direction: "top" });
-
-                // Popup al click: nome zona + tutti i valori disponibili
-                const righe = Object.entries(VARIABILI).map(([chiave, v]) =>
-                    `<small style="color: #475569;">${v.label}: <b>${d.valori[chiave]}${v.unita}</b></small>`
-                ).join("<br>");
-                circle.bindPopup(`
-                    <div style="font-family: sans-serif;">
-                        <strong style="font-size: 14px; color: #2c3e50;">${d.nome}</strong><br>
-                        ${righe}
-                    </div>
-                `);
-            });
-
-            // Aggiorniamo l'etichetta della legenda con la variabile mostrata
-            document.getElementById("legend-title").textContent =
-                `${def.label} — ${minV}${def.unita} (più basso) → ${maxV}${def.unita} (più alto)`;
+        // Codice meteo WMO (Open-Meteo) -> emoji + descrizione in italiano.
+        function descriviMeteo(code, isDay) {
+            if (code === 0) return { emoji: isDay ? "☀️" : "🌙", testo: "Sereno" };
+            if (code === 1 || code === 2) return { emoji: isDay ? "🌤️" : "☁️", testo: "Poco nuvoloso" };
+            if (code === 3) return { emoji: "☁️", testo: "Coperto" };
+            if (code === 45 || code === 48) return { emoji: "🌫️", testo: "Nebbia" };
+            if (code >= 51 && code <= 57) return { emoji: "🌦️", testo: "Pioviggine" };
+            if (code >= 61 && code <= 67) return { emoji: "🌧️", testo: "Pioggia" };
+            if (code >= 71 && code <= 77) return { emoji: "🌨️", testo: "Neve" };
+            if (code >= 80 && code <= 82) return { emoji: "🌧️", testo: "Rovesci" };
+            if (code >= 85 && code <= 86) return { emoji: "🌨️", testo: "Rovesci di neve" };
+            if (code >= 95) return { emoji: "⛈️", testo: "Temporale" };
+            return { emoji: "⛅", testo: "Variabile" };
         }
 
-        // --- Punti di interesse da OpenStreetMap (Overpass API) ---
+        async function caricaMeteoRoma() {
+            const [lat, lon] = COORD_ROMA;
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const c = (await res.json()).current;
+                const meteo = descriviMeteo(c.weather_code, c.is_day);
+
+                document.getElementById("weather-icon").textContent = meteo.emoji;
+                document.getElementById("weather-temp").textContent = `${Math.round(c.temperature_2m)}°C`;
+                document.getElementById("weather-cond").textContent = `Roma · ${meteo.testo}`;
+                document.getElementById("weather-feels").textContent = `${Math.round(c.apparent_temperature)}°`;
+                document.getElementById("weather-hum").textContent = `${c.relative_humidity_2m}%`;
+                document.getElementById("weather-wind").textContent = `${Math.round(c.wind_speed_10m)} km/h`;
+
+                const ora = new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+                document.getElementById("weather-time").textContent = `Aggiornato: ${ora}`;
+                nascondiErrore();
+            } catch (e) {
+                console.error("Errore meteo Roma:", e);
+                mostraErrore("Meteo di Roma non disponibile. Riprova tra poco.");
+            }
+        }
+
+        // ===================== PUNTI DI INTERESSE (OpenStreetMap / Overpass) =====================
         let RAGGIO_POI_M = 2000;     // Raggio di ricerca (regolabile via slider), in metri
         let posizioneUtente = null;  // [lat, lon] del GPS reale (memorizzato una volta ottenuto)
         let centroRicerca = null;    // Centro effettivo usato per le query (GPS o fallback)
@@ -302,8 +269,6 @@
             });
         }
 
-        const CENTRO_ROMA = [41.8902, 12.4922]; // Fallback per test quando il GPS manca
-
         // Disegna il marker centrale e il cerchio del raggio, adattando lo zoom al raggio.
         function disegnaPosizioneUtente(test) {
             posizioneLayer.clearLayers();
@@ -335,7 +300,7 @@
             } else {
                 // GPS non disponibile (es. test locale in http): usiamo il centro di Roma.
                 // Su Cloud Run (HTTPS) il GPS reale funziona e questo ramo non scatta.
-                centroRicerca = CENTRO_ROMA;
+                centroRicerca = COORD_ROMA;
                 test = true;
             }
 
@@ -403,51 +368,13 @@
             }
         }
 
-        // Punti di interesse selezionabili dal menu (caricati entro 2 km dalla posizione)
+        // Punti di interesse selezionabili dal menu
         const POI = {
-            nasoni: { label: "⛲ Nasoni vicini (2 km)" },
-            parchi: { label: "🌳 Parchi vicini (2 km)" }
+            nasoni: { label: "⛲ Nasoni (fontanelle)" },
+            parchi: { label: "🌳 Parchi (oltre 3000 m²)" }
         };
 
-        async function caricaMappaTermica() {
-            const lats = zoneRoma.map(z => z.lat).join(",");
-            const lons = zoneRoma.map(z => z.lon).join(",");
-            const variabiliApi = Object.values(VARIABILI).map(v => v.apiVar).join(",");
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=${variabiliApi}`;
-
-            try {
-                const response = await fetch(url);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const data = await response.json();
-
-                // Open-Meteo restituisce un array con più coordinate, ma un singolo
-                // oggetto con una sola: normalizziamo sempre ad array.
-                const risultati = Array.isArray(data) ? data : [data];
-
-                nascondiErrore(); // Il fetch è andato a buon fine
-
-                // Aggiorniamo l'orario dell'ultimo refresh dei dati
-                const ora = new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
-                document.getElementById("last-update").textContent = `Ultimo aggiornamento: ${ora}`;
-
-                // Conserviamo TUTTE le variabili per ogni punto: servono sia per il
-                // layer selezionato sia per la lettura al click sulla mappa.
-                datiCorrenti = zoneRoma.map((zona, index) => {
-                    const cur = risultati[index].current;
-                    const valori = {};
-                    for (const [chiave, def] of Object.entries(VARIABILI)) {
-                        valori[chiave] = cur[def.apiVar];
-                    }
-                    return { nome: zona.nome, lat: zona.lat, lon: zona.lon, valori };
-                });
-
-                disegnaCerchi(); // Disegna i cerchi per la variabile attiva
-            } catch (error) {
-                console.error("Errore durante il fetch dei dati meteo:", error);
-                mostraErrore("Dati meteo non disponibili. Controlla la connessione e riprova.");
-            }
-        }
-
+        // ===================== UI: pannello, menu, slider =====================
         // Pannello informativo collassabile (utile soprattutto su mobile)
         const infoBox = document.getElementById("info-box");
         const collapseBtn = document.getElementById("collapse-btn");
@@ -459,45 +386,25 @@
         collapseBtn.addEventListener("click", () => {
             impostaCollasso(!infoBox.classList.contains("collapsed"));
         });
-        // Su schermi piccoli partiamo compressi per non coprire la mappa
         if (window.matchMedia("(max-width: 480px)").matches) impostaCollasso(true);
 
-        // Popoliamo il menu a tendina: gruppo "Meteo" + gruppo "Punti di interesse"
+        // Popoliamo il menu: opzione placeholder + i punti di interesse
         const layerSelect = document.getElementById("layer-select");
-
-        const gruppoMeteo = document.createElement("optgroup");
-        gruppoMeteo.label = "Meteo";
-        for (const [chiave, def] of Object.entries(VARIABILI)) {
-            const opt = document.createElement("option");
-            opt.value = chiave;
-            opt.textContent = def.label;
-            if (chiave === variabileAttiva) opt.selected = true;
-            gruppoMeteo.appendChild(opt);
-        }
-        layerSelect.appendChild(gruppoMeteo);
-
-        const gruppoPoi = document.createElement("optgroup");
-        gruppoPoi.label = "Punti di interesse";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Scegli cosa mostrare…";
+        placeholder.selected = true;
+        layerSelect.appendChild(placeholder);
         for (const [chiave, def] of Object.entries(POI)) {
             const opt = document.createElement("option");
             opt.value = chiave;
             opt.textContent = def.label;
-            gruppoPoi.appendChild(opt);
+            layerSelect.appendChild(opt);
         }
-        layerSelect.appendChild(gruppoPoi);
 
-        // Al cambio: variabile meteo -> ricolora i cerchi; POI -> carica da OpenStreetMap
         layerSelect.addEventListener("change", (e) => {
             const val = e.target.value;
-            if (val in VARIABILI) {
-                variabileAttiva = val;
-                poiAttivo = null;
-                poiLayer.clearLayers();       // togliamo eventuali nasoni/parchi
-                posizioneLayer.clearLayers(); // e il marker "sei qui" + raggio
-                disegnaCerchi();
-            } else if (val in POI) {
-                mostraPoi(val); // chiede il GPS e mostra i POI entro il raggio
-            }
+            if (val in POI) mostraPoi(val); // chiede il GPS e mostra i POI entro il raggio
         });
 
         // Slider del raggio: aggiorna l'etichetta live, ricarica i POI al rilascio
@@ -511,13 +418,15 @@
             if (poiAttivo) mostraPoi(poiAttivo); // ricarica con il nuovo raggio
         });
 
-        // Il pulsante "Riprova" nel banner riavvia il caricamento
-        document.getElementById("retry-btn").addEventListener("click", caricaMappaTermica);
+        // Il pulsante "Riprova" ricarica il meteo e, se attivo, il layer di POI
+        document.getElementById("retry-btn").addEventListener("click", () => {
+            caricaMeteoRoma();
+            if (poiAttivo) mostraPoi(poiAttivo);
+        });
 
-        caricaMappaTermica();
-
-        // Aggiornamento automatico periodico dei dati meteo
-        setInterval(caricaMappaTermica, INTERVALLO_REFRESH_MS);
+        // Avvio: meteo di Roma + auto-refresh periodico
+        caricaMeteoRoma();
+        setInterval(caricaMeteoRoma, INTERVALLO_REFRESH_MS);
     </script>
 </body>
 </html>
