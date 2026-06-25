@@ -2,7 +2,7 @@
 ROMA · Punti di interesse + meteo
 Roadmap delle modifiche e limiti del progetto
 ========================================================================
-Ultimo aggiornamento: 25/06/2026
+Ultimo aggiornamento: 25/06/2026 (rev. layout mobile)
 
 ------------------------------------------------------------------------
 1. COS'È OGGI IL PROGETTO
@@ -28,6 +28,11 @@ generale della città. Funzioni attuali:
 - Clustering dei marker, popup informativi sui POI.
 - Robustezza: fallback su più mirror Overpass, banner di errore con
   "Riprova", info-box collassabile e layout adattato su mobile.
+- Layout MOBILE (schermi <=480px) ottimizzato:
+    * Riquadro meteo/temperatura compatto e in VERTICALE (le voci
+      Percepiti/Umidità/Vento incolonnate invece che affiancate).
+    * Pannello "Punti di interesse" spostato in BASSO a sinistra, che si
+      apre verso l'ALTO al tocco della freccia (flex column-reverse).
 
 Dipendenze esterne: Leaflet + Leaflet.markercluster (CDN unpkg),
 API Open-Meteo (meteo), API Overpass (POI da OpenStreetMap),
